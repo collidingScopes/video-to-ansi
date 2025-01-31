@@ -1,87 +1,81 @@
+<!--
+To do:
+Use code page 437 font
+Toggle for different char sets
+Toggle for brightness threshold
+Randomize inputs button
+Export as image / video
+Ability to accept user video input
+More palettes
+Entire UI should change color when palette is changed?
+Footer / links div
+Mobile testing
+Responsive design that fits onto user device width/height size
+Don't allow user slider for frame rate. Instead just render at the fastest frame rate we can, and display what that value is in the UI
+Keyboard shortcut hotkeys
+Toggle to invert charset
+Add some randomness and glitches (matrix rain effect, etc.)
+-->
+
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ANSI Webcam Art</title>
-    <style>
-        body {
-            margin: 0;
-            background: #000;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            color: #0f0;
-            font-family: monospace;
-            min-height: 100vh;
-            padding: 20px;
-            box-sizing: border-box;
-        }
-        #container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin: 20px;
-        }
-        #processCanvas {
-            display: none;
-        }
-        video {
-            display: none;
-        }
-        .controls {
-            margin: 20px;
-            color: #0f0;
-            text-shadow: 0 0 5px #0f0;
-        }
-        label, button {
-            margin-right: 20px;
-        }
-        input[type="range"] {
-            background: #0f0;
-        }
-        h1 {
-            color: #0f0;
-            text-shadow: 0 0 10px #0f0;
-            font-family: monospace;
-            margin: 0;
-            padding: 20px 0;
-        }
-        button {
-            background: #000;
-            color: #0f0;
-            border: 1px solid #0f0;
-            padding: 5px 15px;
-            font-family: monospace;
-            cursor: pointer;
-            text-shadow: 0 0 5px #0f0;
-            transition: all 0.3s ease;
-        }
-        button:hover {
-            background: #0f0;
-            color: #000;
-        }
-        #outputCanvas {
-            border: 1px solid #333;
-            background: #000;
-        }
-    </style>
+    <title>ANSI TEXT CAMERA</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <h1>CYBERPUNK ANSI CAM</h1>
-    <div class="controls">
-        <button id="playPause">PAUSE</button>
-        <label>Detail Level: 
-            <input type="range" id="resolution" min="40" max="200" value="120">
-            <span id="resValue">120x90</span>
-        </label>
-        <label>FPS: 
-            <input type="range" id="fps" min="1" max="60" value="30">
-            <span id="fpsValue">30</span>
-        </label>
-    </div>
     <div id="container">
-        <video id="video" autoplay playsinline width="640" height="480"></video>
-        <canvas id="processCanvas"></canvas>
-        <canvas id="outputCanvas"></canvas>
+        <div class="header">
+            <div class="header-left">
+                <h1>ANSI TEXT CAMERA</h1>
+            </div>
+            <div class="header-right">
+                <button id="playPause" class="terminal-button">⏯</button>
+                <button class="terminal-button">📷</button>
+                <button class="terminal-button">[TBD]</button>
+            </div>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label>PALETTE:</label>
+                <div class="select-wrapper">
+                    <select id="paletteSelect" class="palette-select">
+                        <option value="cyberpunk">CYBERPUNK</option>
+                        <option value="anime">ANIME</option>
+                        <option value="terminal">TERMINAL</option>
+                        <option value="ibm">IBM</option>
+                        <option value="retro">RETRO</option>
+                        <option value="evangelion">EVANGELION</option>
+                    </select>
+                </div>
+            </div>
+            <div class="control-group">
+                <label>FONT SCALE:</label>
+                <input type="range" id="fontScale" min="100" max="300" value="140">
+                <span id="fontScaleValue" class="value-display">1.4</span>
+            </div>
+            <div class="control-group">
+                <label>RESOLUTION:</label>
+                <input type="range" id="resolution" min="40" max="200" value="100">
+                <span id="resValue" class="value-display">100x75</span>
+            </div>
+            <div class="control-group">
+                <label>FRAMERATE:</label>
+                <input type="range" id="fps" min="1" max="60" value="30">
+                <span id="fpsValue" class="value-display">30</span>
+            </div>
+            <div class="control-group">
+                <label>Invert: <input type="checkbox" id="invertCheckbox"> </label>
+            </div>
+
+        </div>
+
+        <div id="viewport">
+            <video id="video" autoplay playsinline width="640" height="480"></video>
+            <canvas id="processCanvas"></canvas>
+            <canvas id="outputCanvas"></canvas>
+        </div>
     </div>
 
     <script id="vertexShader" type="x-shader/x-vertex">
@@ -127,20 +121,85 @@
     </script>
 
     <script>
-        const ANSI_CHARS = " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
+        // const ANSI_CHARS = " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
+        const ANSI_CHARS = " .'`^\",:;·-~=+|│*▪○░▒▓▄▀■████████";
 
-        const COLORS = {
-            bright_green: '#6f6',
-            green: '#0f0',
-            bright_cyan: '#6ff',
-            cyan: '#0ff',
-            bright_blue: '#66f',
-            blue: '#00f',
-            bright_magenta: '#f6f',
-            magenta: '#f0f',
-            white: '#fff',
-            gray: '#666'
+        const COLOR_PALETTES = {
+            cyberpunk: {
+                primary: '#0ff',
+                secondary: '#ff0',
+                accent: '#f0f',
+                highlight: '#fff',
+                mid: '#0aa',
+                dark: '#088',
+                shadow: '#044',
+                background: '#000'
+            },
+            anime: {
+                primary: '#ffb7c5',
+                secondary: '#0ff',
+                accent: '#ffd700',
+                highlight: '#fff',
+                mid: '#ff69b4',
+                dark: '#db7093',
+                shadow: '#c71585',
+                background: '#000'
+            },
+            terminal: {
+                primary: '#0f0',
+                secondary: '#f0f',
+                accent: '#0ff',
+                highlight: '#fff',
+                mid: '#0a0',
+                dark: '#080',
+                shadow: '#040',
+                background: '#000'
+            },
+            default: {
+                bright_green: '#6f6',
+                green: '#0f0',
+                bright_cyan: '#6ff',
+                cyan: '#0ff',
+                bright_blue: '#66f',
+                blue: '#00f',
+                bright_magenta: '#f6f',
+                magenta: '#f0f',
+                white: '#fff',
+                gray: '#666'
+            },
+            ibm: {
+                primary: '#5DA5D5',
+                secondary: '#3C4F65',
+                accent: '#D0421B',
+                highlight: '#fff',
+                mid: '#4178BE',
+                dark: '#2D3F4A',
+                shadow: '#1D2529',
+                background: '#000'
+            },
+            retro: {
+                primary: '#83B799',
+                secondary: '#EDB879',
+                accent: '#D36135',
+                highlight: '#E6E49F',
+                mid: '#567568',
+                dark: '#2E4052',
+                shadow: '#1F2937',
+                background: '#000'
+            },
+            evangelion: {
+                primary: '#9B1F1F',
+                secondary: '#4A138C',
+                accent: '#FF6B00',
+                highlight: '#fff',
+                mid: '#731616',
+                dark: '#350D0D',
+                shadow: '#1A0606',
+                background: '#000'
+            },
         };
+
+        let currentPalette = 'cyberpunk';
 
         class ANSIWebcam {
             constructor() {
@@ -150,7 +209,10 @@
                 this.resolutionSlider = document.getElementById('resolution');
                 this.fpsSlider = document.getElementById('fps');
                 this.playPauseBtn = document.getElementById('playPause');
-                
+                this.fontScaleSlider = document.getElementById('fontScale');
+                this.invertCheckbox = document.getElementById('invertCheckbox');
+                this.reversedChars = ANSI_CHARS.split('').reverse().join('');
+
                 this.isPlaying = true;
                 this.animationId = null;
                 this.lastFrameTime = 0;
@@ -171,6 +233,11 @@
                 });
                 this.ctx.textBaseline = 'top';
                 this.ctx.textAlign = 'center';
+
+                // Set text rendering to optimize for dense character placement
+                this.ctx.font = 'monospace';
+                this.ctx.letterSpacing = '-1px';
+                this.ctx.textRendering = 'optimizeLegibility';
             }
 
             calculateCanvasSize() {
@@ -259,9 +326,14 @@
             }
 
             setupEventListeners() {
+
+                document.getElementById('paletteSelect').addEventListener('change', (e) => {
+                    currentPalette = e.target.value;
+                });
+
                 this.playPauseBtn.addEventListener('click', () => {
                     this.isPlaying = !this.isPlaying;
-                    this.playPauseBtn.textContent = this.isPlaying ? 'PAUSE' : 'PLAY';
+                    // this.playPauseBtn.textContent = this.isPlaying ? 'PAUSE' : 'PLAY';
                     if (this.isPlaying) {
                         this.video.play();
                         this.render();
@@ -285,6 +357,11 @@
                     this.frameInterval = 1000 / parseInt(this.fpsSlider.value);
                 });
 
+                this.fontScaleSlider.addEventListener('input', () => {
+                    const fontScale = this.fontScaleSlider.value / 100;
+                    document.getElementById('fontScaleValue').textContent = fontScale.toFixed(1);
+                });
+
                 window.addEventListener('resize', () => {
                     clearTimeout(this.resizeTimeout);
                     this.resizeTimeout = setTimeout(() => {
@@ -296,23 +373,25 @@
             getColorForPixel(r, g, b) {
                 const intensity = (r + g + b) / 3;
                 const colorThreshold = 0.6;
+                const palette = COLOR_PALETTES[currentPalette];
 
-                if (r > colorThreshold && g < colorThreshold && b < colorThreshold) {
-                    return COLORS.bright_magenta;
+                // Color selection based on both intensity and color components
+                if (intensity > 0.8) {
+                    return palette.highlight;
+                } else if (r > colorThreshold && g < colorThreshold && b < colorThreshold) {
+                    return palette.accent;
                 } else if (g > colorThreshold && r < colorThreshold && b < colorThreshold) {
-                    return COLORS.bright_green;
+                    return palette.secondary;
                 } else if (b > colorThreshold && r < colorThreshold && g < colorThreshold) {
-                    return COLORS.bright_cyan;
-                } else if (intensity > 0.8) {
-                    return COLORS.white;
+                    return palette.primary;
                 } else if (intensity > 0.6) {
-                    return COLORS.bright_cyan;
+                    return palette.mid;
                 } else if (intensity > 0.4) {
-                    return COLORS.cyan;
+                    return palette.dark;
                 } else if (intensity > 0.2) {
-                    return COLORS.blue;
+                    return palette.shadow;
                 }
-                return COLORS.gray;
+                return palette.background;
             }
 
             render = (currentTime) => {
@@ -349,11 +428,13 @@
                 this.ctx.fillRect(0, 0, this.outputCanvas.width, this.outputCanvas.height);
                 
                 // Calculate character dimensions
-                const charWidth = this.outputCanvas.width / width;
+                const charWidth = (this.outputCanvas.width / width);
                 const charHeight = this.outputCanvas.height / height;
-                this.ctx.font = `${Math.min(charWidth, charHeight)}px monospace`;
-
+                const fontScale = this.fontScaleSlider.value / 100;
+                this.ctx.font = `${Math.min(charWidth, charHeight) * fontScale}px Font437 monospace`;
                 // Render characters
+                const currentChars = this.invertCheckbox.checked ? this.reversedChars : ANSI_CHARS;
+            
                 for (let y = 0; y < height; y++) {
                     for (let x = 0; x < width; x++) {
                         const i = (y * width + x) * 4;
@@ -362,11 +443,11 @@
                         const b = pixels[i + 2] / 255;
                         const brightness = pixels[i + 3] / 255; // Use pre-calculated brightness from shader
                         
-                        const charIndex = Math.floor(brightness * (ANSI_CHARS.length - 1));
+                        const charIndex = Math.floor(brightness * (currentChars.length - 1));
                         this.ctx.fillStyle = this.getColorForPixel(r, g, b);
                         this.ctx.fillText(
-                            ANSI_CHARS[charIndex],
-                            (x + 0.5) * charWidth,
+                            currentChars[charIndex],
+                            (x+0.5) * charWidth,
                             y * charHeight
                         );
                     }
