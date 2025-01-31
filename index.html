@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>High Performance ANSI Webcam Art</title>
+    <style>
+        /*
+        @font-face {
+            font-family: 'CP437';
+            src: url('https://cdnjs.cloudflare.com/ajax/libs/oldschool-pc-fonts/2.2/PxPlus_IBM_BIOS.ttf') format('truetype');
+        }
+        */
+        body {
+            margin: 0;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: #0f0;
+            font-family: monospace;
+            min-height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        #container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px;
+        }
+        #processCanvas {
+            display: none;
+        }
+        video {
+            display: none;
+        }
+        .controls {
+            margin: 20px;
+            color: #0f0;
+            text-shadow: 0 0 5px #0f0;
+        }
+        label, button {
+            margin-right: 20px;
+        }
+        input[type="range"] {
+            background: #0f0;
+        }
+        h1 {
+            color: #0f0;
+            text-shadow: 0 0 10px #0f0;
+            font-family: "Courier New", Courier, monospace;
+            margin: 0;
+            padding: 20px 0;
+        }
+        button {
+            background: #000;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 5px 15px;
+            font-family: "Courier New", Courier, monospace;
+            cursor: pointer;
+            text-shadow: 0 0 5px #0f0;
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            background: #0f0;
+            color: #000;
+        }
+        #outputCanvas {
+            border: 1px solid #333;
+            background: #000;
+            font-family: "Courier New", Courier, monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>CYBERPUNK ANSI CAM</h1>
+    <div class="controls">
+        <button id="playPause">PAUSE</button>
+        <label>Detail Level: 
+            <input type="range" id="resolution" min="40" max="200" value="120">
+            <span id="resValue">120x90</span>
+        </label>
+        <label>FPS: 
+            <input type="range" id="fps" min="1" max="60" value="15">
+            <span id="fpsValue">15</span>
+        </label>
+    </div>
+    <div id="container">
+        <video id="video" autoplay playsinline width="640" height="480"></video>
+        <canvas id="processCanvas"></canvas>
+        <canvas id="outputCanvas"></canvas>
+    </div>
+
+    <script id="vertexShader" type="x-shader/x-vertex">
+        attribute vec2 position;
+        varying vec2 texCoord;
+        void main() {
+            texCoord = position * 0.5 + 0.5;
+            gl_Position = vec4(position, 0.0, 1.0);
+        }
+    </script>
+
+    <script id="fragmentShader" type="x-shader/x-fragment">
+        precision mediump float;
+        varying vec2 texCoord;
+        uniform sampler2D uTexture;
+        uniform vec2 uResolution;
+
+        void main() {
+            vec2 pixelSize = 1.0 / uResolution;
+            vec2 cell = floor(texCoord / pixelSize) * pixelSize;
+            
+            vec4 color = vec4(0.0);
+            float samples = 0.0;
+            
+            for(float x = 0.0; x < 1.0; x += 0.5) {
+                for(float y = 0.0; y < 1.0; y += 0.5) {
+                    vec2 samplePos = cell + vec2(x, y) * pixelSize;
+                    color += texture2D(uTexture, samplePos);
+                    samples += 1.0;
+                }
+            }
+            
+            color /= samples;
+            gl_FragColor = color;
+        }
+    </script>
+
+    <script>
+        const ANSI_CHARS = " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
+
+        const COLORS = {
+            cyan: '#0ff',
+            bright_cyan: '#6ff',
+            blue: '#00f',
+            bright_blue: '#66f',
+            green: '#0f0',
+            bright_green: '#6f6',
+            magenta: '#f0f',
+            bright_magenta: '#f6f',
+            white: '#fff',
+            bright_white: '#fff'
+        };
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function setupWebGL(canvas, vertexSource, fragmentSource) {
+            const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
+            if (!gl) return null;
+
+            const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexSource);
+            const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+
+            const program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error(gl.getProgramInfoLog(program));
+                return null;
+            }
+
+            const positions = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+            return {
+                gl,
+                program,
+                positionLocation: gl.getAttribLocation(program, 'position'),
+                resolutionLocation: gl.getUniformLocation(program, 'uResolution'),
+                textureLocation: gl.getUniformLocation(program, 'uTexture')
+            };
+        }
+
+        function getColorForPixel(r, g, b) {
+            const intensity = (r + g + b) / 3;
+            const colorThreshold = 0.6;
+
+            if (r > colorThreshold && g < colorThreshold && b < colorThreshold) {
+                return COLORS.bright_magenta;
+            } else if (g > colorThreshold && r < colorThreshold && b < colorThreshold) {
+                return COLORS.bright_green;
+            } else if (b > colorThreshold && r < colorThreshold && g < colorThreshold) {
+                return COLORS.bright_cyan;
+            } else if (intensity > 0.8) {
+                return COLORS.bright_white;
+            } else if (intensity > 0.6) {
+                return COLORS.white;
+            } else if (intensity > 0.4) {
+                return COLORS.cyan;
+            } else if (intensity > 0.2) {
+                return COLORS.blue;
+            }
+            return '#666';
+        }
+
+        function calculateCanvasSize() {
+            const padding = 100; // Space for controls and margins
+            const maxWidth = window.innerWidth - padding;
+            const maxHeight = window.innerHeight - padding;
+            const aspectRatio = 16 / 9; // Standard video aspect ratio
+
+            let width = maxWidth;
+            let height = width / aspectRatio;
+
+            if (height > maxHeight) {
+                height = maxHeight;
+                width = height * aspectRatio;
+            }
+
+            return { width: Math.floor(width), height: Math.floor(height) };
+        }
+
+        async function main() {
+            const video = document.getElementById('video');
+            const processCanvas = document.getElementById('processCanvas');
+            const outputCanvas = document.getElementById('outputCanvas');
+            const resolutionSlider = document.getElementById('resolution');
+            const fpsSlider = document.getElementById('fps');
+            const resValue = document.getElementById('resValue');
+            const fpsValue = document.getElementById('fpsValue');
+            const playPauseBtn = document.getElementById('playPause');
+            
+            const canvasSize = calculateCanvasSize();
+            outputCanvas.width = canvasSize.width;
+            outputCanvas.height = canvasSize.height;
+            
+            const ctx = outputCanvas.getContext('2d', { alpha: false });
+            
+            // Calculate initial character size based on current resolution value
+            const initialWidth = parseInt(resolutionSlider.value);
+            const initialHeight = Math.floor(initialWidth * (9/16)); // Using 16:9 aspect ratio for initial setup
+            const initialCharWidth = outputCanvas.width / initialWidth;
+            const initialCharHeight = outputCanvas.height / initialHeight;
+            
+            // Set initial font size
+            ctx.font = `${Math.min(initialCharWidth, initialCharHeight)}px "Courier New"`;
+            ctx.textBaseline = 'top';
+            ctx.textAlign = 'center';
+            
+            let isPlaying = true;
+            let animationId = null;
+
+            function updateFont(width, height) {
+                const charWidth = outputCanvas.width / width;
+                const charHeight = outputCanvas.height / height;
+                ctx.font = `${Math.min(charWidth, charHeight)}px "Courier New"`;
+            }
+
+            //await document.fonts.load(`${charSize}px CP437`);
+
+            playPauseBtn.addEventListener('click', () => {
+                isPlaying = !isPlaying;
+                playPauseBtn.textContent = isPlaying ? 'PAUSE' : 'PLAY';
+                if (isPlaying) {
+                    video.play();
+                    render(0);
+                } else {
+                    video.pause();
+                    if (animationId) {
+                        cancelAnimationFrame(animationId);
+                        animationId = null;
+                    }
+                }
+            });
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    } 
+                });
+                video.srcObject = stream;
+                await video.play();
+                
+                processCanvas.width = video.videoWidth;
+                processCanvas.height = video.videoHeight;
+                
+                const glSetup = setupWebGL(
+                    processCanvas,
+                    document.getElementById('vertexShader').textContent,
+                    document.getElementById('fragmentShader').textContent
+                );
+                
+                if (!glSetup) {
+                    throw new Error('WebGL setup failed');
+                }
+
+                const { gl, program, positionLocation, resolutionLocation } = glSetup;
+
+                const texture = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, texture);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+                let lastFrameTime = 0;
+                let frameInterval = 1000 / parseInt(fpsSlider.value);
+
+                function render(currentTime) {
+        if (!isPlaying) return;
+        animationId = requestAnimationFrame(render);
+
+        if (currentTime - lastFrameTime < frameInterval) {
+            return;
+        }
+        lastFrameTime = currentTime;
+
+        const width = parseInt(resolutionSlider.value);
+        const height = Math.floor(width * (processCanvas.height / processCanvas.width));
+        
+        gl.viewport(0, 0, width, height);
+        gl.useProgram(program);
+
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+
+        gl.uniform2f(resolutionLocation, width, height);
+        gl.enableVertexAttribArray(positionLocation);
+        gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+        const pixels = new Uint8Array(width * height * 4);
+        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+        // Clear canvas with full black
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
+        
+        // Update font size based on current dimensions
+        updateFont(width, height);
+
+        // Render characters
+        const charWidth = outputCanvas.width / width;
+        const charHeight = outputCanvas.height / height;
+
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const i = (y * width + x) * 4;
+                const r = pixels[i] / 255;
+                const g = pixels[i + 1] / 255;
+                const b = pixels[i + 2] / 255;
+                const brightness = (r + g + b) / 3;
+                const charIndex = Math.floor(brightness * (ANSI_CHARS.length - 1));
+                
+                ctx.fillStyle = getColorForPixel(r, g, b);
+                ctx.fillText(
+                    ANSI_CHARS[charIndex],
+                    (x + 0.5) * charWidth,
+                    y * charHeight
+                );
+            }
+        }
+    }
+
+                render(0);
+
+                resolutionSlider.addEventListener('input', () => {
+                    const width = parseInt(resolutionSlider.value);
+                    const height = Math.floor(width * (processCanvas.height / processCanvas.width));
+                    resValue.textContent = `${width}x${height}`;
+                });
+
+                fpsSlider.addEventListener('input', () => {
+                    fpsValue.textContent = fpsSlider.value;
+                    frameInterval = 1000 / parseInt(fpsSlider.value);
+                });
+
+            } catch (error) {
+                console.error('Error:', error);
+                ctx.fillStyle = '#f00';
+                ctx.fillText('Error accessing webcam. Please make sure you have a webcam connected and have granted permission to use it.', 
+                    outputCanvas.width / 2, outputCanvas.height / 2);
+            }
+        }
+
+        main();
+
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                location.reload();
+            }, 250);
+        });
+    </script>
+</body>
+</html>
