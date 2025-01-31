@@ -1,14 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>High Performance ANSI Webcam Art</title>
+    <title>ANSI Webcam Art</title>
     <style>
-        /*
-        @font-face {
-            font-family: 'CP437';
-            src: url('https://cdnjs.cloudflare.com/ajax/libs/oldschool-pc-fonts/2.2/PxPlus_IBM_BIOS.ttf') format('truetype');
-        }
-        */
         body {
             margin: 0;
             background: #000;
@@ -47,7 +41,7 @@
         h1 {
             color: #0f0;
             text-shadow: 0 0 10px #0f0;
-            font-family: "Courier New", Courier, monospace;
+            font-family: monospace;
             margin: 0;
             padding: 20px 0;
         }
@@ -56,7 +50,7 @@
             color: #0f0;
             border: 1px solid #0f0;
             padding: 5px 15px;
-            font-family: "Courier New", Courier, monospace;
+            font-family: monospace;
             cursor: pointer;
             text-shadow: 0 0 5px #0f0;
             transition: all 0.3s ease;
@@ -68,7 +62,6 @@
         #outputCanvas {
             border: 1px solid #333;
             background: #000;
-            font-family: "Courier New", Courier, monospace;
         }
     </style>
 </head>
@@ -81,8 +74,8 @@
             <span id="resValue">120x90</span>
         </label>
         <label>FPS: 
-            <input type="range" id="fps" min="1" max="60" value="15">
-            <span id="fpsValue">15</span>
+            <input type="range" id="fps" min="1" max="60" value="30">
+            <span id="fpsValue">30</span>
         </label>
     </div>
     <div id="container">
@@ -106,23 +99,30 @@
         uniform sampler2D uTexture;
         uniform vec2 uResolution;
 
+        const vec3 luminanceWeights = vec3(0.299, 0.587, 0.114);
+
+        vec4 sampleColor(vec2 pos) {
+            vec4 color = texture2D(uTexture, pos);
+            float luminance = dot(color.rgb, luminanceWeights);
+            return vec4(color.rgb, luminance);
+        }
+
         void main() {
             vec2 pixelSize = 1.0 / uResolution;
             vec2 cell = floor(texCoord / pixelSize) * pixelSize;
             
-            vec4 color = vec4(0.0);
-            float samples = 0.0;
+            vec4 totalColor = vec4(0.0);
+            const float samples = 4.0;
             
-            for(float x = 0.0; x < 1.0; x += 0.5) {
-                for(float y = 0.0; y < 1.0; y += 0.5) {
+            // 2x2 super-sampling
+            for(float x = 0.25; x < 1.0; x += 0.5) {
+                for(float y = 0.25; y < 1.0; y += 0.5) {
                     vec2 samplePos = cell + vec2(x, y) * pixelSize;
-                    color += texture2D(uTexture, samplePos);
-                    samples += 1.0;
+                    totalColor += sampleColor(samplePos);
                 }
             }
             
-            color /= samples;
-            gl_FragColor = color;
+            gl_FragColor = totalColor / samples;
         }
     </script>
 
@@ -130,275 +130,281 @@
         const ANSI_CHARS = " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
 
         const COLORS = {
-            cyan: '#0ff',
-            bright_cyan: '#6ff',
-            blue: '#00f',
-            bright_blue: '#66f',
-            green: '#0f0',
             bright_green: '#6f6',
-            magenta: '#f0f',
+            green: '#0f0',
+            bright_cyan: '#6ff',
+            cyan: '#0ff',
+            bright_blue: '#66f',
+            blue: '#00f',
             bright_magenta: '#f6f',
+            magenta: '#f0f',
             white: '#fff',
-            bright_white: '#fff'
+            gray: '#666'
         };
 
-        function createShader(gl, type, source) {
-            const shader = gl.createShader(type);
-            gl.shaderSource(shader, source);
-            gl.compileShader(shader);
-            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-                console.error(gl.getShaderInfoLog(shader));
-                gl.deleteShader(shader);
-                return null;
-            }
-            return shader;
-        }
+        class ANSIWebcam {
+            constructor() {
+                this.video = document.getElementById('video');
+                this.processCanvas = document.getElementById('processCanvas');
+                this.outputCanvas = document.getElementById('outputCanvas');
+                this.resolutionSlider = document.getElementById('resolution');
+                this.fpsSlider = document.getElementById('fps');
+                this.playPauseBtn = document.getElementById('playPause');
+                
+                this.isPlaying = true;
+                this.animationId = null;
+                this.lastFrameTime = 0;
+                this.frameInterval = 1000 / parseInt(this.fpsSlider.value);
 
-        function setupWebGL(canvas, vertexSource, fragmentSource) {
-            const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
-            if (!gl) return null;
-
-            const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexSource);
-            const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
-
-            const program = gl.createProgram();
-            gl.attachShader(program, vertexShader);
-            gl.attachShader(program, fragmentShader);
-            gl.linkProgram(program);
-
-            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-                console.error(gl.getProgramInfoLog(program));
-                return null;
+                this.setupCanvas();
+                this.setupWebGL();
+                this.setupEventListeners();
             }
 
-            const positions = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
-            const positionBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-
-            return {
-                gl,
-                program,
-                positionLocation: gl.getAttribLocation(program, 'position'),
-                resolutionLocation: gl.getUniformLocation(program, 'uResolution'),
-                textureLocation: gl.getUniformLocation(program, 'uTexture')
-            };
-        }
-
-        function getColorForPixel(r, g, b) {
-            const intensity = (r + g + b) / 3;
-            const colorThreshold = 0.6;
-
-            if (r > colorThreshold && g < colorThreshold && b < colorThreshold) {
-                return COLORS.bright_magenta;
-            } else if (g > colorThreshold && r < colorThreshold && b < colorThreshold) {
-                return COLORS.bright_green;
-            } else if (b > colorThreshold && r < colorThreshold && g < colorThreshold) {
-                return COLORS.bright_cyan;
-            } else if (intensity > 0.8) {
-                return COLORS.bright_white;
-            } else if (intensity > 0.6) {
-                return COLORS.white;
-            } else if (intensity > 0.4) {
-                return COLORS.cyan;
-            } else if (intensity > 0.2) {
-                return COLORS.blue;
-            }
-            return '#666';
-        }
-
-        function calculateCanvasSize() {
-            const padding = 100; // Space for controls and margins
-            const maxWidth = window.innerWidth - padding;
-            const maxHeight = window.innerHeight - padding;
-            const aspectRatio = 16 / 9; // Standard video aspect ratio
-
-            let width = maxWidth;
-            let height = width / aspectRatio;
-
-            if (height > maxHeight) {
-                height = maxHeight;
-                width = height * aspectRatio;
-            }
-
-            return { width: Math.floor(width), height: Math.floor(height) };
-        }
-
-        async function main() {
-            const video = document.getElementById('video');
-            const processCanvas = document.getElementById('processCanvas');
-            const outputCanvas = document.getElementById('outputCanvas');
-            const resolutionSlider = document.getElementById('resolution');
-            const fpsSlider = document.getElementById('fps');
-            const resValue = document.getElementById('resValue');
-            const fpsValue = document.getElementById('fpsValue');
-            const playPauseBtn = document.getElementById('playPause');
-            
-            const canvasSize = calculateCanvasSize();
-            outputCanvas.width = canvasSize.width;
-            outputCanvas.height = canvasSize.height;
-            
-            const ctx = outputCanvas.getContext('2d', { alpha: false });
-            
-            // Calculate initial character size based on current resolution value
-            const initialWidth = parseInt(resolutionSlider.value);
-            const initialHeight = Math.floor(initialWidth * (9/16)); // Using 16:9 aspect ratio for initial setup
-            const initialCharWidth = outputCanvas.width / initialWidth;
-            const initialCharHeight = outputCanvas.height / initialHeight;
-            
-            // Set initial font size
-            ctx.font = `${Math.min(initialCharWidth, initialCharHeight)}px "Courier New"`;
-            ctx.textBaseline = 'top';
-            ctx.textAlign = 'center';
-            
-            let isPlaying = true;
-            let animationId = null;
-
-            function updateFont(width, height) {
-                const charWidth = outputCanvas.width / width;
-                const charHeight = outputCanvas.height / height;
-                ctx.font = `${Math.min(charWidth, charHeight)}px "Courier New"`;
-            }
-
-            //await document.fonts.load(`${charSize}px CP437`);
-
-            playPauseBtn.addEventListener('click', () => {
-                isPlaying = !isPlaying;
-                playPauseBtn.textContent = isPlaying ? 'PAUSE' : 'PLAY';
-                if (isPlaying) {
-                    video.play();
-                    render(0);
-                } else {
-                    video.pause();
-                    if (animationId) {
-                        cancelAnimationFrame(animationId);
-                        animationId = null;
-                    }
-                }
-            });
-
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { 
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
-                    } 
+            setupCanvas() {
+                const canvasSize = this.calculateCanvasSize();
+                this.outputCanvas.width = canvasSize.width;
+                this.outputCanvas.height = canvasSize.height;
+                this.ctx = this.outputCanvas.getContext('2d', { 
+                    alpha: false,
+                    desynchronized: true
                 });
-                video.srcObject = stream;
-                await video.play();
-                
-                processCanvas.width = video.videoWidth;
-                processCanvas.height = video.videoHeight;
-                
-                const glSetup = setupWebGL(
-                    processCanvas,
-                    document.getElementById('vertexShader').textContent,
+                this.ctx.textBaseline = 'top';
+                this.ctx.textAlign = 'center';
+            }
+
+            calculateCanvasSize() {
+                const padding = 100;
+                const maxWidth = window.innerWidth - padding;
+                const maxHeight = window.innerHeight - padding;
+                const aspectRatio = 16 / 9;
+
+                let width = maxWidth;
+                let height = width / aspectRatio;
+
+                if (height > maxHeight) {
+                    height = maxHeight;
+                    width = height * aspectRatio;
+                }
+
+                return { 
+                    width: Math.floor(width), 
+                    height: Math.floor(height) 
+                };
+            }
+
+            setupWebGL() {
+                this.gl = this.processCanvas.getContext('webgl', {
+                    preserveDrawingBuffer: true,
+                    antialias: false,
+                    depth: false,
+                    stencil: false
+                });
+
+                if (!this.gl) {
+                    throw new Error('WebGL not supported');
+                }
+
+                const vertexShader = this.createShader(
+                    this.gl.VERTEX_SHADER,
+                    document.getElementById('vertexShader').textContent
+                );
+                const fragmentShader = this.createShader(
+                    this.gl.FRAGMENT_SHADER,
                     document.getElementById('fragmentShader').textContent
                 );
-                
-                if (!glSetup) {
-                    throw new Error('WebGL setup failed');
+
+                this.program = this.createProgram(vertexShader, fragmentShader);
+                this.positionLocation = this.gl.getAttribLocation(this.program, 'position');
+                this.resolutionLocation = this.gl.getUniformLocation(this.program, 'uResolution');
+
+                // Create position buffer
+                const positions = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+                const positionBuffer = this.gl.createBuffer();
+                this.gl.bindBuffer(this.gl.ARRAY_BUFFER, positionBuffer);
+                this.gl.bufferData(this.gl.ARRAY_BUFFER, positions, this.gl.STATIC_DRAW);
+
+                // Create and set up texture
+                this.texture = this.gl.createTexture();
+                this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture);
+                this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
+                this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+                this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
+                this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
+            }
+
+            createShader(type, source) {
+                const shader = this.gl.createShader(type);
+                this.gl.shaderSource(shader, source);
+                this.gl.compileShader(shader);
+
+                if (!this.gl.getShaderParameter(shader, this.gl.COMPILE_STATUS)) {
+                    throw new Error(this.gl.getShaderInfoLog(shader));
                 }
 
-                const { gl, program, positionLocation, resolutionLocation } = glSetup;
+                return shader;
+            }
 
-                const texture = gl.createTexture();
-                gl.bindTexture(gl.TEXTURE_2D, texture);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            createProgram(vertexShader, fragmentShader) {
+                const program = this.gl.createProgram();
+                this.gl.attachShader(program, vertexShader);
+                this.gl.attachShader(program, fragmentShader);
+                this.gl.linkProgram(program);
 
-                let lastFrameTime = 0;
-                let frameInterval = 1000 / parseInt(fpsSlider.value);
+                if (!this.gl.getProgramParameter(program, this.gl.LINK_STATUS)) {
+                    throw new Error(this.gl.getProgramInfoLog(program));
+                }
 
-                function render(currentTime) {
-        if (!isPlaying) return;
-        animationId = requestAnimationFrame(render);
+                return program;
+            }
 
-        if (currentTime - lastFrameTime < frameInterval) {
-            return;
-        }
-        lastFrameTime = currentTime;
+            setupEventListeners() {
+                this.playPauseBtn.addEventListener('click', () => {
+                    this.isPlaying = !this.isPlaying;
+                    this.playPauseBtn.textContent = this.isPlaying ? 'PAUSE' : 'PLAY';
+                    if (this.isPlaying) {
+                        this.video.play();
+                        this.render();
+                    } else {
+                        this.video.pause();
+                        if (this.animationId) {
+                            cancelAnimationFrame(this.animationId);
+                            this.animationId = null;
+                        }
+                    }
+                });
 
-        const width = parseInt(resolutionSlider.value);
-        const height = Math.floor(width * (processCanvas.height / processCanvas.width));
-        
-        gl.viewport(0, 0, width, height);
-        gl.useProgram(program);
+                this.resolutionSlider.addEventListener('input', () => {
+                    const width = parseInt(this.resolutionSlider.value);
+                    const height = Math.floor(width * (this.processCanvas.height / this.processCanvas.width));
+                    document.getElementById('resValue').textContent = `${width}x${height}`;
+                });
 
-        gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+                this.fpsSlider.addEventListener('input', () => {
+                    document.getElementById('fpsValue').textContent = this.fpsSlider.value;
+                    this.frameInterval = 1000 / parseInt(this.fpsSlider.value);
+                });
 
-        gl.uniform2f(resolutionLocation, width, height);
-        gl.enableVertexAttribArray(positionLocation);
-        gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+                window.addEventListener('resize', () => {
+                    clearTimeout(this.resizeTimeout);
+                    this.resizeTimeout = setTimeout(() => {
+                        location.reload();
+                    }, 250);
+                });
+            }
 
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            getColorForPixel(r, g, b) {
+                const intensity = (r + g + b) / 3;
+                const colorThreshold = 0.6;
 
-        const pixels = new Uint8Array(width * height * 4);
-        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+                if (r > colorThreshold && g < colorThreshold && b < colorThreshold) {
+                    return COLORS.bright_magenta;
+                } else if (g > colorThreshold && r < colorThreshold && b < colorThreshold) {
+                    return COLORS.bright_green;
+                } else if (b > colorThreshold && r < colorThreshold && g < colorThreshold) {
+                    return COLORS.bright_cyan;
+                } else if (intensity > 0.8) {
+                    return COLORS.white;
+                } else if (intensity > 0.6) {
+                    return COLORS.bright_cyan;
+                } else if (intensity > 0.4) {
+                    return COLORS.cyan;
+                } else if (intensity > 0.2) {
+                    return COLORS.blue;
+                }
+                return COLORS.gray;
+            }
 
-        // Clear canvas with full black
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
-        
-        // Update font size based on current dimensions
-        updateFont(width, height);
+            render = (currentTime) => {
+                if (!this.isPlaying) return;
+                this.animationId = requestAnimationFrame(this.render);
 
-        // Render characters
-        const charWidth = outputCanvas.width / width;
-        const charHeight = outputCanvas.height / height;
+                if (currentTime - this.lastFrameTime < this.frameInterval) {
+                    return;
+                }
+                this.lastFrameTime = currentTime;
 
-        for (let y = 0; y < height; y++) {
-            for (let x = 0; x < width; x++) {
-                const i = (y * width + x) * 4;
-                const r = pixels[i] / 255;
-                const g = pixels[i + 1] / 255;
-                const b = pixels[i + 2] / 255;
-                const brightness = (r + g + b) / 3;
-                const charIndex = Math.floor(brightness * (ANSI_CHARS.length - 1));
+                const width = parseInt(this.resolutionSlider.value);
+                const height = Math.floor(width * (this.processCanvas.height / this.processCanvas.width));
                 
-                ctx.fillStyle = getColorForPixel(r, g, b);
-                ctx.fillText(
-                    ANSI_CHARS[charIndex],
-                    (x + 0.5) * charWidth,
-                    y * charHeight
-                );
+                this.gl.viewport(0, 0, width, height);
+                this.gl.useProgram(this.program);
+
+                // Update texture with new video frame
+                this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture);
+                this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, this.video);
+
+                this.gl.uniform2f(this.resolutionLocation, width, height);
+                this.gl.enableVertexAttribArray(this.positionLocation);
+                this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, 0, 0);
+
+                this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+
+                // Read pixels (includes both color and brightness in alpha channel)
+                const pixels = new Uint8Array(width * height * 4);
+                this.gl.readPixels(0, 0, width, height, this.gl.RGBA, this.gl.UNSIGNED_BYTE, pixels);
+
+                // Clear output canvas
+                this.ctx.fillStyle = '#000';
+                this.ctx.fillRect(0, 0, this.outputCanvas.width, this.outputCanvas.height);
+                
+                // Calculate character dimensions
+                const charWidth = this.outputCanvas.width / width;
+                const charHeight = this.outputCanvas.height / height;
+                this.ctx.font = `${Math.min(charWidth, charHeight)}px monospace`;
+
+                // Render characters
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const i = (y * width + x) * 4;
+                        const r = pixels[i] / 255;
+                        const g = pixels[i + 1] / 255;
+                        const b = pixels[i + 2] / 255;
+                        const brightness = pixels[i + 3] / 255; // Use pre-calculated brightness from shader
+                        
+                        const charIndex = Math.floor(brightness * (ANSI_CHARS.length - 1));
+                        this.ctx.fillStyle = this.getColorForPixel(r, g, b);
+                        this.ctx.fillText(
+                            ANSI_CHARS[charIndex],
+                            (x + 0.5) * charWidth,
+                            y * charHeight
+                        );
+                    }
+                }
+            }
+
+            async start() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { 
+                            width: { ideal: 640 },
+                            height: { ideal: 480 }
+                        } 
+                    });
+                    
+                    this.video.srcObject = stream;
+                    await this.video.play();
+                    
+                    this.processCanvas.width = this.video.videoWidth;
+                    this.processCanvas.height = this.video.videoHeight;
+                    
+                    this.render(0);
+                    
+                } catch (error) {
+                    console.error('Error:', error);
+                    this.ctx.fillStyle = '#f00';
+                    this.ctx.fillText(
+                        'Error accessing webcam. Please make sure you have a webcam connected and have granted permission to use it.',
+                        this.outputCanvas.width / 2,
+                        this.outputCanvas.height / 2
+                    );
+                }
             }
         }
-    }
 
-                render(0);
-
-                resolutionSlider.addEventListener('input', () => {
-                    const width = parseInt(resolutionSlider.value);
-                    const height = Math.floor(width * (processCanvas.height / processCanvas.width));
-                    resValue.textContent = `${width}x${height}`;
-                });
-
-                fpsSlider.addEventListener('input', () => {
-                    fpsValue.textContent = fpsSlider.value;
-                    frameInterval = 1000 / parseInt(fpsSlider.value);
-                });
-
-            } catch (error) {
-                console.error('Error:', error);
-                ctx.fillStyle = '#f00';
-                ctx.fillText('Error accessing webcam. Please make sure you have a webcam connected and have granted permission to use it.', 
-                    outputCanvas.width / 2, outputCanvas.height / 2);
-            }
-        }
-
-        main();
-
-        let resizeTimeout;
-        window.addEventListener('resize', () => {
-            clearTimeout(resizeTimeout);
-            resizeTimeout = setTimeout(() => {
-                location.reload();
-            }, 250);
-        });
+        // Initialize and start the application
+        const app = new ANSIWebcam();
+        app.start();
     </script>
 </body>
 </html>
