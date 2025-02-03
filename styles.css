@@ -174,7 +174,7 @@ h1 {
     box-shadow: inset 0 0 20px rgba(0, 255, 0, 0.2);
 }
 
-.palette-select {
+.palette-select, .char-set-select {
     background: var(--terminal-dark);
     color: var(--primary);
     border: 1px solid var(--primary);
@@ -189,19 +189,13 @@ h1 {
     min-width: 150px;
 }
 
-.palette-select:hover {
+.palette-select:hover, .char-set-select:hover {
     box-shadow: 0 0 10px var(--glow-color);
 }
 
-.palette-select:focus {
+.palette-select:focus, .char-set-select:focus {
     outline: none;
     border-color: var(--terminal-cyan);
-}
-
-.palette-group {
-    display: flex;
-    align-items: center;
-    gap: 10px;
 }
 
 /* Custom dropdown arrow */
